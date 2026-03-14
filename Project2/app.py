@@ -1,11 +1,13 @@
 """
 STAT5243 Project 2: Interactive Data Analysis Web Application
-- UI/UX with polished layout and styling
-- Cached reactive calculations
-- Button-triggered EDA plotting to avoid unnecessary redraws
+- Polished UI/UX with hierarchy and contrast
+- Cached reactive calculations for responsiveness
+- Button-triggered EDA plotting to reduce lag
 - Sampled visualization data for large datasets
-- Safe preprocessing and feature engineering
-- Dynamic feedback and robustness
+- Cleaning summary table
+- Feature engineering visual feedback (before/after histogram)
+- Strong EDA controls (aggregation + trendline + filter summary)
+- Safe preprocessing and robust notifications
 """
 
 import os
@@ -26,7 +28,7 @@ warnings.filterwarnings("ignore")
 # PATHS / BUILT-IN DATASETS
 # ============================================================
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(APP_DIR, "数据")   
+DATA_DIR = os.path.join(APP_DIR, "数据")
 
 BUILT_IN_DATASETS = {
     "financial_news": {
@@ -181,6 +183,35 @@ def make_feature_stats(df: pd.DataFrame, cols: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def cleaning_summary_df(before_stats: dict, after_df: pd.DataFrame, log: list) -> pd.DataFrame:
+    if before_stats is None or after_df is None:
+        return pd.DataFrame()
+
+    after_stats = summarize_df(after_df)
+    return pd.DataFrame({
+        "Metric": ["Rows", "Columns", "Missing Values", "Steps Applied"],
+        "Before": [
+            before_stats["rows"],
+            before_stats["cols"],
+            before_stats["missing"],
+            0
+        ],
+        "After": [
+            after_stats["rows"],
+            after_stats["cols"],
+            after_stats["missing"],
+            len(log)
+        ]
+    })
+
+
+def make_empty_figure(text: str, height: int = 420):
+    fig = go.Figure()
+    fig.add_annotation(text=text, x=0.5, y=0.5, showarrow=False, font=dict(size=16))
+    fig.update_layout(template="plotly_white", height=height)
+    return fig
+
+
 # ============================================================
 # UI
 # ============================================================
@@ -197,7 +228,13 @@ def create_app_ui():
                     --text-main: #0f172a;
                     --text-muted: #475569;
                     --border: #e2e8f0;
-                    --shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+                    --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+                    --success-soft: #ecfdf5;
+                    --success-border: #a7f3d0;
+                    --info-soft: #eff6ff;
+                    --info-border: #bfdbfe;
+                    --warn-soft: #fff7ed;
+                    --warn-border: #fdba74;
                 }
 
                 body {
@@ -234,12 +271,12 @@ def create_app_ui():
                 }
 
                 .status-banner {
-                    background: rgba(255,255,255,0.18);
-                    border: 1px solid rgba(255,255,255,0.28);
+                    background: rgba(255,255,255,0.90);
+                    border: 1px solid rgba(255,255,255,0.45);
                     border-radius: 14px;
                     padding: 14px 16px;
                     margin-top: 18px;
-                    color: #f8fafc;
+                    color: #0f172a;
                     backdrop-filter: blur(6px);
                 }
 
@@ -248,7 +285,7 @@ def create_app_ui():
                     border: 1px solid var(--border);
                     border-radius: 18px;
                     box-shadow: var(--shadow);
-                    padding: 18px 18px 14px 18px;
+                    padding: 20px 20px 16px 20px;
                     margin-bottom: 16px;
                 }
 
@@ -262,7 +299,8 @@ def create_app_ui():
                 .section-subtitle {
                     color: var(--text-muted);
                     font-size: 0.93rem;
-                    margin-bottom: 12px;
+                    margin-bottom: 14px;
+                    line-height: 1.45;
                 }
 
                 .mini-stat {
@@ -306,10 +344,37 @@ def create_app_ui():
                     padding: 14px;
                 }
 
+                .help-box {
+                    background: var(--info-soft);
+                    border: 1px solid var(--info-border);
+                    border-radius: 12px;
+                    padding: 10px 12px;
+                    margin-bottom: 12px;
+                    color: #1e3a8a;
+                    font-size: 0.9rem;
+                }
+
+                .success-box {
+                    background: var(--success-soft);
+                    border: 1px solid var(--success-border);
+                    border-radius: 12px;
+                    padding: 10px 12px;
+                    margin-bottom: 12px;
+                }
+
+                .warn-box {
+                    background: var(--warn-soft);
+                    border: 1px solid var(--warn-border);
+                    border-radius: 12px;
+                    padding: 10px 12px;
+                    margin-bottom: 12px;
+                }
+
                 .nav-tabs {
                     gap: 4px;
                     border-bottom: none !important;
                     margin-bottom: 12px;
+                    flex-wrap: wrap;
                 }
 
                 .nav-tabs .nav-link {
@@ -377,6 +442,15 @@ def create_app_ui():
                 table.dataTable {
                     font-size: 13px;
                 }
+
+                @media (max-width: 900px) {
+                    .hero-title {
+                        font-size: 1.6rem;
+                    }
+                    .app-shell {
+                        padding: 14px;
+                    }
+                }
             """)
         ),
 
@@ -393,9 +467,6 @@ def create_app_ui():
                 ),
 
                 ui.navset_tab(
-                    # =====================================================
-                    # HOME
-                    # =====================================================
                     ui.nav_panel(
                         "🏠 Home",
                         ui.row(
@@ -452,10 +523,9 @@ def create_app_ui():
                                         ui.div(ui.strong("Pokedex Data"), ui.p("Categorical and numeric toy dataset", class_="muted"), class_="workflow-step"),
                                     ),
                                     ui.hr(),
-                                    ui.p(
-                                        ui.strong("Tip: "),
-                                        "Use Reset to Original Data any time you want to start over from the loaded dataset.",
-                                        class_="muted"
+                                    ui.div(
+                                        "Start in the Data Loading tab, then move left-to-right through the workflow.",
+                                        class_="help-box"
                                     ),
                                     class_="app-card"
                                 )
@@ -463,9 +533,6 @@ def create_app_ui():
                         )
                     ),
 
-                    # =====================================================
-                    # DATA LOADING
-                    # =====================================================
                     ui.nav_panel(
                         "📁 Data Loading",
                         ui.row(
@@ -474,6 +541,10 @@ def create_app_ui():
                                 ui.div(
                                     ui.div("Load a Dataset", class_="section-title"),
                                     ui.p("Choose between uploading a file or using one of the built-in datasets.", class_="section-subtitle"),
+                                    ui.div(
+                                        "Supported upload formats: CSV, JSON, XLSX. File type is detected automatically.",
+                                        class_="help-box"
+                                    ),
                                     ui.input_radio_buttons(
                                         "data_source",
                                         "Data source",
@@ -488,8 +559,7 @@ def create_app_ui():
                                                 "Choose file",
                                                 accept=[".csv", ".json", ".xlsx"],
                                                 multiple=False
-                                            ),
-                                            ui.p("File type is detected automatically from the filename.", class_="muted")
+                                            )
                                         )
                                     ),
                                     ui.panel_conditional(
@@ -538,9 +608,6 @@ def create_app_ui():
                         )
                     ),
 
-                    # =====================================================
-                    # DATA CLEANING
-                    # =====================================================
                     ui.nav_panel(
                         "🧹 Data Cleaning",
                         ui.row(
@@ -549,6 +616,10 @@ def create_app_ui():
                                 ui.div(
                                     ui.div("Cleaning Pipeline", class_="section-title"),
                                     ui.p("Choose the preprocessing steps to apply, then click Apply Cleaning.", class_="section-subtitle"),
+                                    ui.div(
+                                        "Tip: Label encoding is compact. One-hot encoding is best for low-cardinality categorical columns.",
+                                        class_="help-box"
+                                    ),
 
                                     ui.h6("Missing Values"),
                                     ui.input_select(
@@ -581,6 +652,7 @@ def create_app_ui():
                                     ui.panel_conditional(
                                         "input.enable_outliers === true",
                                         ui.div(
+                                            ui.div("Uses the IQR rule to cap extreme values or remove outlier rows.", class_="help-box"),
                                             ui.input_select(
                                                 "outlier_method",
                                                 "Method",
@@ -604,6 +676,7 @@ def create_app_ui():
                                     ui.panel_conditional(
                                         "input.enable_scaling === true",
                                         ui.div(
+                                            ui.div("Standard scaling is useful for many models; Min-Max scales to [0,1]; Robust is less sensitive to outliers.", class_="help-box"),
                                             ui.input_select(
                                                 "cleaning_scale_method",
                                                 "Method",
@@ -661,6 +734,9 @@ def create_app_ui():
                                     ui.br(),
                                     ui.output_ui("cleaning_log"),
                                     ui.hr(),
+                                    ui.div("Cleaning Summary", class_="section-title"),
+                                    ui.output_table("cleaning_summary_table"),
+                                    ui.hr(),
                                     ui.div("Cleaned Data Preview", class_="section-title"),
                                     ui.output_data_frame("cleaned_data_preview"),
                                     ui.hr(),
@@ -677,9 +753,6 @@ def create_app_ui():
                         )
                     ),
 
-                    # =====================================================
-                    # FEATURE ENGINEERING
-                    # =====================================================
                     ui.nav_panel(
                         "⚙️ Feature Engineering",
                         ui.row(
@@ -688,6 +761,10 @@ def create_app_ui():
                                 ui.div(
                                     ui.div("Create New Features", class_="section-title"),
                                     ui.p("Apply feature transformations and inspect what was created.", class_="section-subtitle"),
+                                    ui.div(
+                                        "Log transform requires positive values. Square-root transform requires non-negative values.",
+                                        class_="help-box"
+                                    ),
                                     ui.input_select(
                                         "feature_type",
                                         "Transformation",
@@ -747,6 +824,7 @@ def create_app_ui():
                                     ui.panel_conditional(
                                         "input.feature_type === 'bin'",
                                         ui.div(
+                                            ui.div("Equal-width uses fixed interval widths; equal-frequency balances the number of observations per bin.", class_="help-box"),
                                             ui.input_select(
                                                 "bin_column",
                                                 "Numeric column",
@@ -779,6 +857,9 @@ def create_app_ui():
                                     ui.br(),
                                     ui.output_ui("feature_eng_log_ui"),
                                     ui.hr(),
+                                    ui.div("Before / After Visualization", class_="section-title"),
+                                    output_widget("feature_preview_plot"),
+                                    ui.hr(),
                                     ui.div("Engineered Data Preview", class_="section-title"),
                                     ui.output_data_frame("transformed_data_preview"),
                                     ui.hr(),
@@ -793,9 +874,6 @@ def create_app_ui():
                         )
                     ),
 
-                    # =====================================================
-                    # EDA
-                    # =====================================================
                     ui.nav_panel(
                         "📈 EDA",
                         ui.row(
@@ -804,6 +882,10 @@ def create_app_ui():
                                 ui.div(
                                     ui.div("Visualization Controls", class_="section-title"),
                                     ui.p("Adjust settings and click Generate Plot to reduce lag.", class_="section-subtitle"),
+                                    ui.div(
+                                        "Scatter plots work best with numeric X and Y columns. Correlation heatmaps use numeric columns only.",
+                                        class_="help-box"
+                                    ),
 
                                     ui.input_select(
                                         "plot_type",
@@ -843,6 +925,17 @@ def create_app_ui():
                                     ui.h6("Plot Options"),
                                     ui.input_slider("hist_bins", "Histogram bins", 5, 60, 20),
                                     ui.input_slider("top_n_categories", "Top N categories", 3, 20, 10),
+                                    ui.input_select(
+                                        "bar_agg",
+                                        "Bar aggregation",
+                                        {
+                                            "mean": "Mean",
+                                            "sum": "Sum",
+                                            "median": "Median",
+                                            "count": "Count"
+                                        }
+                                    ),
+                                    ui.input_checkbox("scatter_trendline", "Add trendline to scatter plot", True),
 
                                     ui.br(),
                                     ui.input_action_button("generate_plot", "Generate Plot", class_="btn-primary w-100"),
@@ -853,6 +946,7 @@ def create_app_ui():
                                 9,
                                 ui.div(
                                     ui.div("Interactive Visualization", class_="section-title"),
+                                    ui.output_ui("active_filter_summary"),
                                     output_widget("eda_plot"),
                                     ui.hr(),
                                     ui.div("Dynamic Insights", class_="section-title"),
@@ -866,9 +960,6 @@ def create_app_ui():
                         )
                     ),
 
-                    # =====================================================
-                    # ABOUT
-                    # =====================================================
                     ui.nav_panel(
                         "ℹ️ About",
                         ui.row(
@@ -901,6 +992,7 @@ def create_app_ui():
                                         ui.p("Freya Chen (yc4684)"),
                                         ui.p("Zhuyun Jin (zj2434)"),
                                         ui.p("Nikhil Shanbhag (nvs2128)"),
+                                        ui.p("Megan Wang (mw3856)"),
                                         class_="info-panel"
                                     ),
                                     class_="app-card"
@@ -933,9 +1025,13 @@ def server(input, output, session):
 
     applied_cleaning_log = reactive.Value([])
     before_cleaning_stats = reactive.Value(None)
+    cleaning_summary_store = reactive.Value(pd.DataFrame())
 
     feature_eng_log = reactive.Value([])
     feature_preview_df = reactive.Value(pd.DataFrame())
+    feature_plot_before = reactive.Value(None)
+    feature_plot_after = reactive.Value(None)
+    feature_plot_title = reactive.Value("")
 
     last_columns = reactive.Value([])
 
@@ -1020,17 +1116,14 @@ def server(input, output, session):
         categorical_cols = cols["categorical"]
         all_cols = cols["all"]
 
-        # cleaning
         ui.update_select("outlier_columns", choices=numeric_cols, selected=[])
         ui.update_select("cleaning_scale_columns", choices=numeric_cols, selected=[])
         ui.update_select("cleaning_encode_columns", choices=categorical_cols, selected=[])
 
-        # feature eng
         ui.update_select("scale_columns", choices=numeric_cols, selected=[])
         ui.update_select("encode_columns", choices=categorical_cols, selected=[])
         ui.update_select("bin_column", choices=numeric_cols, selected=numeric_cols[0] if numeric_cols else None)
 
-        # eda
         ui.update_select("x_axis", choices=["None"] + all_cols, selected="None")
         ui.update_select("y_axis", choices=["None"] + all_cols, selected="None")
         ui.update_select("color_by", choices=["None"] + categorical_cols, selected="None")
@@ -1130,8 +1223,14 @@ def server(input, output, session):
 
             applied_cleaning_log.set([])
             before_cleaning_stats.set(None)
+            cleaning_summary_store.set(pd.DataFrame())
+
             feature_eng_log.set([])
             feature_preview_df.set(pd.DataFrame())
+            feature_plot_before.set(None)
+            feature_plot_after.set(None)
+            feature_plot_title.set("")
+
             plot_cache.set(None)
 
             ui.notification_show(
@@ -1156,8 +1255,14 @@ def server(input, output, session):
 
         applied_cleaning_log.set([])
         before_cleaning_stats.set(None)
+        cleaning_summary_store.set(pd.DataFrame())
+
         feature_eng_log.set([])
         feature_preview_df.set(pd.DataFrame())
+        feature_plot_before.set(None)
+        feature_plot_after.set(None)
+        feature_plot_title.set("")
+
         plot_cache.set(None)
 
         ui.notification_show("Reset to original loaded dataset.", type="message")
@@ -1219,10 +1324,10 @@ def server(input, output, session):
 
         df = df.copy()
         log = []
-        before_cleaning_stats.set(summarize_df(df))
+        before_stats = summarize_df(df)
+        before_cleaning_stats.set(before_stats)
 
         try:
-            # Missing values
             strategy = input.missing_strategy()
             if strategy != "none":
                 missing_before = int(df.isnull().sum().sum())
@@ -1260,14 +1365,12 @@ def server(input, output, session):
                 missing_after = int(df.isnull().sum().sum())
                 log.append(f"Missing values changed from {missing_before:,} to {missing_after:,}.")
 
-            # Duplicates
             if input.handle_duplicates():
                 before_rows = len(df)
                 df = df.drop_duplicates()
                 removed = before_rows - len(df)
                 log.append(f"Removed {removed:,} duplicate row(s).")
 
-            # Text cleaning
             text_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
             if input.strip_whitespace() and text_cols:
@@ -1280,7 +1383,6 @@ def server(input, output, session):
                     df[col] = df[col].astype(str).str.lower()
                 log.append(f"Converted text to lowercase in {len(text_cols)} column(s).")
 
-            # Outliers
             if input.enable_outliers():
                 requested = list(input.outlier_columns()) if input.outlier_columns() else []
                 valid_cols = [c for c in requested if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
@@ -1312,7 +1414,6 @@ def server(input, output, session):
                 else:
                     log.append("Outlier handling skipped because no valid numeric columns were selected.")
 
-            # Scaling
             if input.enable_scaling():
                 requested = list(input.cleaning_scale_columns()) if input.cleaning_scale_columns() else []
                 valid_cols = [c for c in requested if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
@@ -1326,7 +1427,6 @@ def server(input, output, session):
                     df[valid_cols] = scaler.fit_transform(df[valid_cols])
                     log.append(f"Applied {method} scaling to {len(valid_cols)} numeric column(s).")
 
-            # Encoding
             if input.enable_encoding():
                 requested = list(input.cleaning_encode_columns()) if input.cleaning_encode_columns() else []
                 valid_cols = [c for c in requested if c in df.columns]
@@ -1361,6 +1461,7 @@ def server(input, output, session):
             feature_data.set(df.copy())
             current_stage.set("Data cleaned / preprocessed")
             applied_cleaning_log.set(log)
+            cleaning_summary_store.set(cleaning_summary_df(before_stats, df, log))
             plot_cache.set(None)
 
             ui.notification_show("Cleaning applied successfully.", type="message")
@@ -1406,6 +1507,14 @@ def server(input, output, session):
             ui.tags.ul(*[ui.tags.li(x) for x in log]),
             class_="info-panel"
         )
+
+    @output
+    @render.table
+    def cleaning_summary_table():
+        df = cleaning_summary_store()
+        if df is None or df.empty:
+            return pd.DataFrame({"Message": ["Cleaning summary will appear here after preprocessing is applied."]})
+        return df
 
     @output
     @render.data_frame
@@ -1513,6 +1622,10 @@ def server(input, output, session):
         log = list(feature_eng_log())
         created_cols = []
 
+        feature_plot_before.set(None)
+        feature_plot_after.set(None)
+        feature_plot_title.set("")
+
         try:
             ft = input.feature_type()
 
@@ -1520,19 +1633,29 @@ def server(input, output, session):
                 cols = list(input.scale_columns()) if input.scale_columns() else []
                 cols = [c for c in cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
                 if not cols:
-                    ui.notification_show("Please select valid numeric columns.", type="warning")
+                    ui.notification_show("Please select valid numeric columns for scaling.", type="warning")
                     return
 
                 method = input.scaling_method()
                 scaler = StandardScaler() if method == "standard" else MinMaxScaler()
+
+                preview_col = cols[0]
+                before_series = df[preview_col].dropna().copy()
+
                 df[cols] = scaler.fit_transform(df[cols])
+                after_series = df[preview_col].dropna().copy()
+
+                feature_plot_before.set(before_series)
+                feature_plot_after.set(after_series)
+                feature_plot_title.set(f"Before / After scaling preview for {preview_col}")
+
                 log.append(f"Scaled {len(cols)} column(s) using {method} scaling.")
 
             elif ft == "encode":
                 cols = list(input.encode_columns()) if input.encode_columns() else []
                 cols = [c for c in cols if c in df.columns]
                 if not cols:
-                    ui.notification_show("Please select valid columns.", type="warning")
+                    ui.notification_show("Please select valid columns for encoding.", type="warning")
                     return
 
                 method = input.encoding_method()
@@ -1563,10 +1686,18 @@ def server(input, output, session):
                 n_bins = input.bin_count()
                 method = input.bin_method()
                 new_col = f"{col}_binned"
+
+                before_series = df[col].dropna().copy()
+
                 if method == "equal":
                     df[new_col] = pd.cut(df[col], bins=n_bins, duplicates="drop")
                 else:
                     df[new_col] = pd.qcut(df[col], q=n_bins, duplicates="drop")
+
+                feature_plot_before.set(before_series)
+                feature_plot_after.set(df[col].dropna().copy())
+                feature_plot_title.set(f"Distribution preview for binned source column {col}")
+
                 created_cols.append(new_col)
                 log.append(f"Created {new_col} using {method} binning with {n_bins} bins.")
 
@@ -1574,50 +1705,84 @@ def server(input, output, session):
                 cols = list(input.scale_columns()) if input.scale_columns() else []
                 cols = [c for c in cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
                 if not cols:
-                    ui.notification_show("Please select valid numeric columns.", type="warning")
+                    ui.notification_show("Please select valid numeric columns for log transform.", type="warning")
                     return
                 done = []
+                preview_col = None
+                before_series = None
+                after_series = None
                 for col in cols:
                     if (df[col] <= 0).any():
                         ui.notification_show(f"Skipped {col}: contains non-positive values.", type="warning")
                         continue
+                    if preview_col is None:
+                        preview_col = col
+                        before_series = df[col].dropna().copy()
                     new_col = f"{col}_log"
                     df[new_col] = np.log(df[col])
                     created_cols.append(new_col)
+                    if col == preview_col:
+                        after_series = df[new_col].dropna().copy()
                     done.append(col)
                 if not done:
                     return
+                if preview_col is not None:
+                    feature_plot_before.set(before_series)
+                    feature_plot_after.set(after_series)
+                    feature_plot_title.set(f"Before / After log transform for {preview_col}")
                 log.append(f"Created {len(done)} log-transformed feature(s).")
 
             elif ft == "sqrt":
                 cols = list(input.scale_columns()) if input.scale_columns() else []
                 cols = [c for c in cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
                 if not cols:
-                    ui.notification_show("Please select valid numeric columns.", type="warning")
+                    ui.notification_show("Please select valid numeric columns for square-root transform.", type="warning")
                     return
                 done = []
+                preview_col = None
+                before_series = None
+                after_series = None
                 for col in cols:
                     if (df[col] < 0).any():
                         ui.notification_show(f"Skipped {col}: contains negative values.", type="warning")
                         continue
+                    if preview_col is None:
+                        preview_col = col
+                        before_series = df[col].dropna().copy()
                     new_col = f"{col}_sqrt"
                     df[new_col] = np.sqrt(df[col])
                     created_cols.append(new_col)
+                    if col == preview_col:
+                        after_series = df[new_col].dropna().copy()
                     done.append(col)
                 if not done:
                     return
+                if preview_col is not None:
+                    feature_plot_before.set(before_series)
+                    feature_plot_after.set(after_series)
+                    feature_plot_title.set(f"Before / After square-root transform for {preview_col}")
                 log.append(f"Created {len(done)} square-root transformed feature(s).")
 
             elif ft == "poly2":
                 cols = list(input.scale_columns()) if input.scale_columns() else []
                 cols = [c for c in cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
                 if not cols:
-                    ui.notification_show("Please select valid numeric columns.", type="warning")
+                    ui.notification_show("Please select valid numeric columns for polynomial features.", type="warning")
                     return
+
+                preview_col = cols[0]
+                before_series = df[preview_col].dropna().copy()
+
                 for col in cols:
                     new_col = f"{col}_sq"
                     df[new_col] = df[col] ** 2
                     created_cols.append(new_col)
+
+                after_series = df[f"{preview_col}_sq"].dropna().copy()
+                feature_plot_before.set(before_series)
+                feature_plot_after.set(after_series)
+                feature_plot_title.set(f"Before / After squared feature for {preview_col}")
+
                 log.append(f"Created squared features for {len(cols)} column(s).")
 
             feature_data.set(df)
@@ -1630,6 +1795,33 @@ def server(input, output, session):
 
         except Exception as e:
             ui.notification_show(f"Error in feature engineering: {str(e)}", type="error")
+
+    @output
+    @render_widget
+    def feature_preview_plot():
+        before_series = feature_plot_before()
+        after_series = feature_plot_after()
+        title = feature_plot_title()
+
+        if before_series is None or after_series is None:
+            return make_empty_figure("Apply a numeric feature transformation to see before / after visual feedback.", 380)
+
+        before_df = pd.DataFrame({"Value": before_series, "Stage": "Before"})
+        after_df = pd.DataFrame({"Value": after_series, "Stage": "After"})
+        plot_df = pd.concat([before_df, after_df], ignore_index=True)
+
+        fig = px.histogram(
+            plot_df,
+            x="Value",
+            color="Stage",
+            barmode="overlay",
+            nbins=30,
+            title=title,
+            height=380,
+            opacity=0.65
+        )
+        fig.update_layout(template="plotly_white")
+        return fig
 
     @output
     @render.data_frame
@@ -1693,7 +1885,7 @@ def server(input, output, session):
             ui.update_select("filter_cat_values", choices=[], selected=[])
 
     # --------------------------------------------------------
-    # Plot generation (button-triggered for performance)
+    # Plot generation
     # --------------------------------------------------------
     @reactive.Effect
     @reactive.event(input.generate_plot)
@@ -1702,17 +1894,11 @@ def server(input, output, session):
         full_df = filtered_df()
 
         if full_df is None:
-            fig = go.Figure()
-            fig.add_annotation(text="Load data first", x=0.5, y=0.5, showarrow=False, font=dict(size=16))
-            fig.update_layout(template="plotly_white", height=420)
-            plot_cache.set(fig)
+            plot_cache.set(make_empty_figure("Load data first"))
             return
 
         if full_df.empty:
-            fig = go.Figure()
-            fig.add_annotation(text="No rows remain after filtering", x=0.5, y=0.5, showarrow=False, font=dict(size=16))
-            fig.update_layout(template="plotly_white", height=420)
-            plot_cache.set(fig)
+            plot_cache.set(make_empty_figure("No rows remain after filtering"))
             return
 
         plot_type = input.plot_type()
@@ -1723,6 +1909,8 @@ def server(input, output, session):
         height = input.plot_height()
         hist_bins = input.hist_bins()
         top_n = input.top_n_categories()
+        bar_agg = input.bar_agg()
+        use_trendline = input.scatter_trendline()
 
         try:
             if plot_type == "histogram":
@@ -1772,19 +1960,29 @@ def server(input, output, session):
                     df, x=x_col, y=y_col, color=color_col,
                     title=f"Scatter Plot: {x_col} vs {y_col}",
                     height=height,
-                    trendline="ols"
+                    trendline="ols" if use_trendline else None
                 )
 
             elif plot_type == "bar":
                 if x_col == "None" or x_col not in full_df.columns:
                     raise ValueError("Please select a valid X-axis column.")
+
                 if y_col != "None" and y_col in full_df.columns and pd.api.types.is_numeric_dtype(full_df[y_col]):
-                    agg = full_df.groupby(x_col, dropna=False)[y_col].mean().reset_index()
+                    if bar_agg == "mean":
+                        agg = full_df.groupby(x_col, dropna=False)[y_col].mean().reset_index()
+                    elif bar_agg == "sum":
+                        agg = full_df.groupby(x_col, dropna=False)[y_col].sum().reset_index()
+                    elif bar_agg == "median":
+                        agg = full_df.groupby(x_col, dropna=False)[y_col].median().reset_index()
+                    else:
+                        agg = full_df.groupby(x_col, dropna=False)[y_col].count().reset_index()
+
                     if len(agg) > top_n:
                         agg = agg.sort_values(y_col, ascending=False).head(top_n)
+
                     fig = px.bar(
                         agg, x=x_col, y=y_col,
-                        title=f"Mean {y_col} by {x_col}",
+                        title=f"{bar_agg.title()} {y_col} by {x_col}",
                         height=height
                     )
                 else:
@@ -1840,27 +2038,41 @@ def server(input, output, session):
             plot_cache.set(fig)
 
         except Exception as e:
-            fig = go.Figure()
-            fig.add_annotation(text=f"{str(e)}", x=0.5, y=0.5, showarrow=False, font=dict(size=14))
-            fig.update_layout(template="plotly_white", height=420)
-            plot_cache.set(fig)
+            plot_cache.set(make_empty_figure(str(e)))
 
     @output
     @render_widget
     def eda_plot():
         fig = plot_cache()
         if fig is None:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="Adjust the controls and click Generate Plot",
-                x=0.5, y=0.5, showarrow=False, font=dict(size=16)
-            )
-            fig.update_layout(template="plotly_white", height=420)
+            fig = make_empty_figure("Adjust the controls and click Generate Plot")
         return fig
 
     # --------------------------------------------------------
     # EDA insights + summary
     # --------------------------------------------------------
+    @output
+    @render.ui
+    def active_filter_summary():
+        df = filtered_df()
+        base = active_df()
+
+        if base is None:
+            return ui.div("Load data first to enable filters and visualizations.", class_="help-box")
+
+        num_col = input.filter_num_col()
+        cat_col = input.filter_cat_col()
+        cat_vals = input.filter_cat_values()
+
+        parts = [f"Rows shown: {len(df):,} of {len(base):,}"]
+
+        if num_col and num_col != "None":
+            parts.append(f"Numeric filter: {num_col}")
+        if cat_col and cat_col != "None" and cat_vals:
+            parts.append(f"Categorical filter: {cat_col} ({len(cat_vals)} selected)")
+
+        return ui.div(" | ".join(parts), class_="success-box")
+
     @output
     @render.ui
     def eda_insights():
