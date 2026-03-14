@@ -161,7 +161,7 @@ The application will display:
 
 ---
 
-### 2. Data Cleaning (Advanced)
+### 2. Data Cleaning 
 
 Navigate to the **Data Cleaning** tab to preprocess your dataset.
 
@@ -201,7 +201,7 @@ The application provides **real-time feedback**, including:
 
 ---
 
-### 3. Feature Engineering (Advanced)
+### 3. Feature Engineering
 
 Navigate to the **Feature Engineering** tab to create new features.
 
