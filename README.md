@@ -76,8 +76,12 @@ pip install -r requirements.txt
 ---
 
 ## Running the Application
+### Option 1: Click the public link directly to open the app (Recommended)
+```
+https://5243freya.shinyapps.io/stat5243-project2/
+```
 
-### Option 1: Using `shiny run` (Recommended)
+### Option 2: Using `shiny run`
 
 ```bash
 shiny run app.py --reload
@@ -93,7 +97,7 @@ The `--reload` option automatically refreshes the application whenever code chan
 
 ---
 
-### Option 2: Using Python directly
+### Option 3: Using Python directly
 
 ```bash
 python app.py
@@ -107,7 +111,7 @@ http://127.0.0.1:8000
 
 ---
 
-### Option 3: Using the provided batch file (Windows)
+### Option 4: Using the provided batch file (Windows)
 
 You can run the application by double-clicking the batch file or running:
 
