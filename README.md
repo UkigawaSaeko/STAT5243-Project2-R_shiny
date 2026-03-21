@@ -309,5 +309,5 @@ https://shiny.posit.co/py/docs/deploy.html
 
 This project was developed for **educational purposes** as part of:
 
-**STAT5243 – Applied Statistics**  
+**STAT5243 – Applied Data Science**  
 Columbia University
