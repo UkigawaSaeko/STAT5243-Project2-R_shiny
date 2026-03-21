@@ -6,7 +6,7 @@ STAT5243 Project 2: Interactive Data Analysis Web Application
 - Sampled visualization data for large datasets
 - Cleaning summary table
 - Feature engineering visual feedback (before/after histogram)
-- Strong EDA controls (aggregation + trendline + filter summary)
+- Strong EDA controls (aggregation + filter summary)
 - Safe preprocessing and robust notifications
 """
 
@@ -21,14 +21,14 @@ from shinywidgets import output_widget, render_widget
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, LabelEncoder
 
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # ============================================================
 # PATHS / BUILT-IN DATASETS
 # ============================================================
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(APP_DIR, "数据")
+DATA_DIR = os.path.join(APP_DIR, "data")
 
 BUILT_IN_DATASETS = {
     "financial_news": {
@@ -1042,7 +1042,11 @@ def server(input, output, session):
     # --------------------------------------------------------
     @reactive.calc
     def active_df():
-        return feature_data()
+        if feature_data() is not None:
+            return feature_data()
+        if processed_data() is not None:
+            return processed_data()
+        return raw_data()
 
     @reactive.calc
     def filtered_df():
@@ -1118,18 +1122,32 @@ def server(input, output, session):
 
         ui.update_select("outlier_columns", choices=numeric_cols, selected=[])
         ui.update_select("cleaning_scale_columns", choices=numeric_cols, selected=[])
-        ui.update_select("cleaning_encode_columns", choices=categorical_cols, selected=[])
 
-        ui.update_select("scale_columns", choices=numeric_cols, selected=[])
-        ui.update_select("encode_columns", choices=categorical_cols, selected=[])
-        ui.update_select("bin_column", choices=numeric_cols, selected=numeric_cols[0] if numeric_cols else None)
+        valid_cleaning_encode = [c for c in input.cleaning_encode_columns() or [] if c in categorical_cols]
+        ui.update_select("cleaning_encode_columns", choices=categorical_cols, selected=valid_cleaning_encode)
 
-        ui.update_select("x_axis", choices=["None"] + all_cols, selected="None")
-        ui.update_select("y_axis", choices=["None"] + all_cols, selected="None")
-        ui.update_select("color_by", choices=["None"] + categorical_cols, selected="None")
+        valid_scale_cols = [c for c in input.scale_columns() or [] if c in numeric_cols]
+        ui.update_select("scale_columns", choices=numeric_cols, selected=valid_scale_cols)
 
-        ui.update_select("filter_num_col", choices=["None"] + numeric_cols, selected="None")
-        ui.update_select("filter_cat_col", choices=["None"] + categorical_cols, selected="None")
+        valid_encode_cols = [c for c in input.encode_columns() or [] if c in categorical_cols]
+        ui.update_select("encode_columns", choices=categorical_cols, selected=valid_encode_cols)
+
+        current_bin = input.bin_column()
+        selected_bin = current_bin if current_bin in numeric_cols else (numeric_cols[0] if numeric_cols else None)
+        ui.update_select("bin_column", choices=numeric_cols, selected=selected_bin)
+
+        current_x = input.x_axis()
+        current_y = input.y_axis()
+        current_color = input.color_by()
+
+        ui.update_select("x_axis", choices=["None"] + all_cols, selected=current_x if current_x in all_cols or current_x == "None" else "None")
+        ui.update_select("y_axis", choices=["None"] + all_cols, selected=current_y if current_y in all_cols or current_y == "None" else "None")
+        ui.update_select("color_by", choices=["None"] + categorical_cols, selected=current_color if current_color in categorical_cols or current_color == "None" else "None")
+
+        current_num_filter = input.filter_num_col()
+        current_cat_filter = input.filter_cat_col()
+        ui.update_select("filter_num_col", choices=["None"] + numeric_cols, selected=current_num_filter if current_num_filter in numeric_cols or current_num_filter == "None" else "None")
+        ui.update_select("filter_cat_col", choices=["None"] + categorical_cols, selected=current_cat_filter if current_cat_filter in categorical_cols or current_cat_filter == "None" else "None")
 
     # --------------------------------------------------------
     # Built-in dataset info
@@ -1375,12 +1393,14 @@ def server(input, output, session):
 
             if input.strip_whitespace() and text_cols:
                 for col in text_cols:
-                    df[col] = df[col].astype(str).str.strip()
+                    mask = df[col].notna()
+                    df.loc[mask, col] = df.loc[mask, col].astype(str).str.strip()
                 log.append(f"Trimmed whitespace in {len(text_cols)} text column(s).")
 
             if input.lowercase_text() and text_cols:
                 for col in text_cols:
-                    df[col] = df[col].astype(str).str.lower()
+                    mask = df[col].notna()
+                    df.loc[mask, col] = df.loc[mask, col].astype(str).str.lower()
                 log.append(f"Converted text to lowercase in {len(text_cols)} column(s).")
 
             if input.enable_outliers():
@@ -1417,15 +1437,25 @@ def server(input, output, session):
             if input.enable_scaling():
                 requested = list(input.cleaning_scale_columns()) if input.cleaning_scale_columns() else []
                 valid_cols = [c for c in requested if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
+
                 if valid_cols:
-                    method = input.cleaning_scale_method()
-                    scaler = (
-                        StandardScaler() if method == "standard"
-                        else MinMaxScaler() if method == "minmax"
-                        else RobustScaler()
-                    )
-                    df[valid_cols] = scaler.fit_transform(df[valid_cols])
-                    log.append(f"Applied {method} scaling to {len(valid_cols)} numeric column(s).")
+                    cols_with_missing = [c for c in valid_cols if df[c].isna().any()]
+                    if cols_with_missing:
+                        ui.notification_show(
+                            f"Scaling skipped for columns with missing values: {', '.join(cols_with_missing[:5])}",
+                            type="warning"
+                        )
+                        valid_cols = [c for c in valid_cols if c not in cols_with_missing]
+
+                    if valid_cols:
+                        method = input.cleaning_scale_method()
+                        scaler = (
+                            StandardScaler() if method == "standard"
+                            else MinMaxScaler() if method == "minmax"
+                            else RobustScaler()
+                        )
+                        df[valid_cols] = scaler.fit_transform(df[valid_cols])
+                        log.append(f"Applied {method} scaling to {len(valid_cols)} numeric column(s).")
 
             if input.enable_encoding():
                 requested = list(input.cleaning_encode_columns()) if input.cleaning_encode_columns() else []
@@ -1694,9 +1724,12 @@ def server(input, output, session):
                 else:
                     df[new_col] = pd.qcut(df[col], q=n_bins, duplicates="drop")
 
+                bin_counts = df[new_col].astype(str).value_counts(dropna=False).reset_index()
+                bin_counts.columns = ["Value", "Count"]
+
                 feature_plot_before.set(before_series)
-                feature_plot_after.set(df[col].dropna().copy())
-                feature_plot_title.set(f"Distribution preview for binned source column {col}")
+                feature_plot_after.set(bin_counts)
+                feature_plot_title.set(f"Binned distribution for {col}")
 
                 created_cols.append(new_col)
                 log.append(f"Created {new_col} using {method} binning with {n_bins} bins.")
@@ -1800,14 +1833,26 @@ def server(input, output, session):
     @render_widget
     def feature_preview_plot():
         before_series = feature_plot_before()
-        after_series = feature_plot_after()
+        after_obj = feature_plot_after()
         title = feature_plot_title()
 
-        if before_series is None or after_series is None:
+        if before_series is None or after_obj is None:
             return make_empty_figure("Apply a numeric feature transformation to see before / after visual feedback.", 380)
 
+        if isinstance(after_obj, pd.DataFrame) and set(after_obj.columns) == {"Value", "Count"}:
+            fig = go.Figure()
+            fig.add_trace(go.Histogram(x=before_series, name="Before", opacity=0.65, nbinsx=30))
+            fig.add_trace(go.Bar(x=after_obj["Value"], y=after_obj["Count"], name="After (Bins)", opacity=0.85))
+            fig.update_layout(
+                title=title,
+                template="plotly_white",
+                height=380,
+                barmode="overlay"
+            )
+            return fig
+
         before_df = pd.DataFrame({"Value": before_series, "Stage": "Before"})
-        after_df = pd.DataFrame({"Value": after_series, "Stage": "After"})
+        after_df = pd.DataFrame({"Value": after_obj, "Stage": "After"})
         plot_df = pd.concat([before_df, after_df], ignore_index=True)
 
         fig = px.histogram(
@@ -1874,12 +1919,25 @@ def server(input, output, session):
                 mx = float(s.max())
                 if mn == mx:
                     mx = mn + 1.0
-                ui.update_slider("filter_num_range", min=mn, max=mx, value=(mn, mx))
+                current_range = input.filter_num_range()
+                if current_range and len(current_range) == 2:
+                    low = max(mn, min(float(current_range[0]), mx))
+                    high = max(low, min(float(current_range[1]), mx))
+                    ui.update_slider("filter_num_range", min=mn, max=mx, value=(low, high))
+                else:
+                    ui.update_slider("filter_num_range", min=mn, max=mx, value=(mn, mx))
 
         cat_col = input.filter_cat_col()
         if cat_col and cat_col != "None" and cat_col in df.columns:
             vals = sorted(df[cat_col].astype(str).dropna().unique().tolist())
-            selected = vals[: min(len(vals), 10)]
+            current_selected = input.filter_cat_values() if input.filter_cat_values() else []
+            still_valid = [v for v in current_selected if v in vals]
+
+            if still_valid:
+                selected = still_valid
+            else:
+                selected = vals[: min(len(vals), 10)]
+
             ui.update_select("filter_cat_values", choices=vals, selected=selected)
         else:
             ui.update_select("filter_cat_values", choices=[], selected=[])
@@ -2064,7 +2122,10 @@ def server(input, output, session):
         cat_col = input.filter_cat_col()
         cat_vals = input.filter_cat_values()
 
-        parts = [f"Rows shown: {len(df):,} of {len(base):,}"]
+        parts = [f"Rows shown after filtering: {len(df):,} of {len(base):,}"]
+
+        if input.plot_type() == "scatter" and len(df) > 3000:
+            parts.append("Scatter plot uses a 3,000-row sample for responsiveness")
 
         if num_col and num_col != "None":
             parts.append(f"Numeric filter: {num_col}")
