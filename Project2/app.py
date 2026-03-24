@@ -1,7 +1,7 @@
 """
 STAT5243 Project 2: Interactive Data Analysis Web Application
-- Polished UI/UX with hierarchy and contrast
-- Cached reactive calculations for responsiveness
+- UI/UX has hierarchy and contrast
+- Cached reactive calculations for responsiveness (to prevent lag)
 - Button-triggered EDA plotting to reduce lag
 - Sampled visualization data for large datasets
 - Cleaning summary table
@@ -24,9 +24,9 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-# ============================================================
+# ------------------------------------------------------------
 # PATHS / BUILT-IN DATASETS
-# ============================================================
+# ------------------------------------------------------------
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -76,9 +76,9 @@ BUILT_IN_DATASETS = {
 }
 
 
-# ============================================================
+# ------------------------------------------------------------
 # HELPERS
-# ============================================================
+# ------------------------------------------------------------
 def infer_file_type(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     return {
@@ -224,9 +224,9 @@ def make_empty_figure(text: str, height: int = 420):
     return fig
 
 
-# ============================================================
+# ------------------------------------------------------------
 # UI
-# ============================================================
+# ------------------------------------------------------------
 def create_app_ui():
     return ui.page_fillable(
         ui.tags.head(
@@ -1024,9 +1024,9 @@ def create_app_ui():
     )
 
 
-# ============================================================
+# ------------------------------------------------------------
 # SERVER
-# ============================================================
+# ------------------------------------------------------------
 def server(input, output, session):
     raw_data = reactive.Value(None)
     processed_data = reactive.Value(None)
@@ -2172,7 +2172,7 @@ def server(input, output, session):
         return summary
 
 
-# ============================================================
+# ------------------------------------------------------------
 # APP
-# ============================================================
+# ------------------------------------------------------------
 app = App(create_app_ui(), server)
