@@ -1,7 +1,7 @@
 """
 STAT5243 Project 2: Interactive Data Analysis Web Application
-- UI/UX has hierarchy and contrast
-- Cached reactive calculations for responsiveness (to prevent lag)
+- Polished UI/UX with hierarchy and contrast
+- Cached reactive calculations for responsiveness
 - Button-triggered EDA plotting to reduce lag
 - Sampled visualization data for large datasets
 - Cleaning summary table
@@ -15,6 +15,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+try:
+    import pyreadr  # type: ignore[import-not-found]
+except ImportError:
+    pyreadr = None
 
 from shiny import App, ui, reactive, render
 from shinywidgets import output_widget, render_widget
@@ -24,9 +28,9 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-# ------------------------------------------------------------
+# ============================================================
 # PATHS / BUILT-IN DATASETS
-# ------------------------------------------------------------
+# ============================================================
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -72,19 +76,27 @@ BUILT_IN_DATASETS = {
         "files": {
             "csv": os.path.join(DATA_DIR, "pokedex.csv"),
         }
-    }
+    },
+    "iris_rds": {
+        "name": "Iris (RDS)",
+        "description": "Classic iris measurements (RDS demo): sepal/petal lengths and widths plus species.",
+        "files": {
+            "rds": os.path.join(DATA_DIR, "iris.rds"),
+        }
+    },
 }
 
 
-# ------------------------------------------------------------
+# ============================================================
 # HELPERS
-# ------------------------------------------------------------
+# ============================================================
 def infer_file_type(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     return {
         ".csv": "csv",
         ".json": "json",
-        ".xlsx": "xlsx"
+        ".xlsx": "xlsx",
+        ".rds": "rds",
     }.get(ext, "")
 
 
@@ -95,6 +107,14 @@ def load_data_from_file(file_path: str, file_type: str) -> pd.DataFrame:
         return pd.read_json(file_path)
     elif file_type == "xlsx":
         return pd.read_excel(file_path)
+    elif file_type == "rds":
+        if pyreadr is None:
+            raise ImportError("Reading RDS requires `pyreadr`. Please install it with: pip install pyreadr")
+        rds_obj = pyreadr.read_r(file_path)
+        for _, value in rds_obj.items():
+            if isinstance(value, pd.DataFrame):
+                return value
+        raise ValueError("RDS file does not contain a readable data.frame.")
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -224,9 +244,9 @@ def make_empty_figure(text: str, height: int = 420):
     return fig
 
 
-# ------------------------------------------------------------
+# ============================================================
 # UI
-# ------------------------------------------------------------
+# ============================================================
 def create_app_ui():
     return ui.page_fillable(
         ui.tags.head(
@@ -491,7 +511,7 @@ def create_app_ui():
                                         class_="section-subtitle"
                                     ),
                                     ui.div(
-                                        ui.span("CSV / JSON / XLSX", class_="pill"),
+                                        ui.span("CSV / JSON / XLSX / RDS", class_="pill"),
                                         ui.span("Built-in datasets", class_="pill"),
                                         ui.span("Interactive cleaning", class_="pill"),
                                         ui.span("Feature engineering", class_="pill"),
@@ -554,7 +574,7 @@ def create_app_ui():
                                     ui.div("Load a Dataset", class_="section-title"),
                                     ui.p("Choose between uploading a file or using one of the built-in datasets.", class_="section-subtitle"),
                                     ui.div(
-                                        "Supported upload formats: CSV, JSON, XLSX. File type is detected automatically.",
+                                        "Supported upload formats: CSV, JSON, XLSX, RDS. File type is detected automatically.",
                                         class_="help-box"
                                     ),
                                     ui.input_radio_buttons(
@@ -569,7 +589,7 @@ def create_app_ui():
                                             ui.input_file(
                                                 "uploaded_file",
                                                 "Choose file",
-                                                accept=[".csv", ".json", ".xlsx"],
+                                                accept=[".csv", ".json", ".xlsx", ".rds"],
                                                 multiple=False
                                             )
                                         )
@@ -585,6 +605,7 @@ def create_app_ui():
                                                     "grocery": "Grocery Chain Data",
                                                     "fifa": "FIFA 21 Player Data",
                                                     "pokedex": "Pokedex Data",
+                                                    "iris_rds": "Iris (RDS sample)",
                                                 }
                                             ),
                                             ui.input_select(
@@ -965,7 +986,7 @@ def create_app_ui():
                                     ui.output_ui("eda_insights"),
                                     ui.hr(),
                                     ui.div("Summary Statistics", class_="section-title"),
-                                    ui.output_table("stat_summary"),
+                                    ui.output_data_frame("stat_summary"),
                                     class_="app-card"
                                 )
                             )
@@ -1024,9 +1045,9 @@ def create_app_ui():
     )
 
 
-# ------------------------------------------------------------
+# ============================================================
 # SERVER
-# ------------------------------------------------------------
+# ============================================================
 def server(input, output, session):
     raw_data = reactive.Value(None)
     processed_data = reactive.Value(None)
@@ -1210,7 +1231,7 @@ def server(input, output, session):
 
                 file_type = infer_file_type(filename)
                 if not file_type:
-                    ui.notification_show("Unsupported file type. Please upload CSV, JSON, or XLSX.", type="error")
+                    ui.notification_show("Unsupported file type. Please upload CSV, JSON, XLSX, or RDS.", type="error")
                     return
 
                 df = load_data_from_file(path, file_type)
@@ -1968,12 +1989,30 @@ def server(input, output, session):
                 if not (pd.api.types.is_numeric_dtype(df[x_col]) and pd.api.types.is_numeric_dtype(df[y_col])):
                     raise ValueError("Scatter plots require numeric X and Y columns.")
 
+                # Do not use px.scatter(trendline="ols"): it requires statsmodels, which is often
+                # missing on hosted environments. OLS line for numeric X/Y is the same as np.polyfit(deg=1).
                 fig = px.scatter(
                     df, x=x_col, y=y_col, color=color_col,
                     title=f"Scatter Plot: {x_col} vs {y_col}",
                     height=height,
-                    trendline="ols" if use_trendline else None
                 )
+                if use_trendline:
+                    sub = df[[x_col, y_col]].dropna()
+                    if len(sub) >= 2:
+                        xv = sub[x_col].astype(float).to_numpy()
+                        yv = sub[y_col].astype(float).to_numpy()
+                        slope, intercept = np.polyfit(xv, yv, 1)
+                        xs = np.linspace(float(xv.min()), float(xv.max()), 100)
+                        ys = slope * xs + intercept
+                        fig.add_trace(
+                            go.Scatter(
+                                x=xs,
+                                y=ys,
+                                mode="lines",
+                                name="OLS trend (linear)",
+                                line=dict(color="#e74c3c", width=2, dash="dash"),
+                            )
+                        )
 
             elif plot_type == "bar":
                 if x_col == "None" or x_col not in full_df.columns:
@@ -2164,15 +2203,18 @@ def server(input, output, session):
             return ui.div(f"Could not compute insights: {str(e)}", class_="info-panel")
 
     @output
-    @render.table
+    @render.data_frame
     def stat_summary():
         summary = numeric_summary()
         if summary is None or summary.empty:
-            return pd.DataFrame({"Message": ["No numeric columns available for summary statistics."]})
-        return summary
+            return render.DataGrid(
+                pd.DataFrame({"Message": ["No numeric columns available for summary statistics."]}),
+                filters=False,
+            )
+        return render.DataGrid(summary, filters=True)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # APP
-# ------------------------------------------------------------
+# ============================================================
 app = App(create_app_ui(), server)
