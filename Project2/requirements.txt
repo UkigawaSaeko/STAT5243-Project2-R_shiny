@@ -29,3 +29,6 @@ jinja2>=3.1.0
 
 # File handling
 python-multipart>=0.0.6
+
+# R RDS files (built-in Iris RDS + upload)
+pyreadr>=0.5.0
