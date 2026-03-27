@@ -9,7 +9,7 @@ The application allows users to load datasets, clean and preprocess data, engine
 ### Key Features
 
 #### Data Loading
-- Upload datasets in **CSV, Excel (XLSX), or JSON formats**
+- Upload datasets in **CSV, Excel (XLSX), JSON or RDS formats**
 - Select from built-in demo datasets included in the project
 
 #### Data Cleaning & Preprocessing
