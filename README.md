@@ -270,10 +270,8 @@ The EDA panel also displays **dynamic statistical summaries** for numeric variab
 
 ## Team Members
 
-- **Freya Chen** (yc4684)  
-- **Zhuyun Jin** (zj2434)  
+- **Freya Chen** (yc4684)   
 - **Nikhil Shanbhag** (nvs2128)  
-- **Megan Wang** (mw3856)
 
 ---
 
